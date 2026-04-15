@@ -20,21 +20,24 @@ El código implementa la arquitectura **AKOrN (Artificial Kuramoto Oscillatory N
 
 ```
 Analisis_Sincronizacion/
+├── setup_mnist.py                              # Prepara/valida MNIST y sincroniza rutas de compatibilidad
+│
 ├── analisis_distribuciones/
-│   ├── generar_metricas_kuramoto_train.py      # Genera métricas de 60k imágenes MNIST
+│   ├── run_kuramoto_TRAIN_MAC.py               # Genera métricas de 60k imágenes MNIST (con checkpoints)
 │   ├── plot_distribuciones_R_stationary.py     # Visualiza distribuciones de R estacionario
 │   └── resultados_kuramoto_TRAIN_MAC_60k/      # Datos: métricas temporales completas
 │
 ├── analisis_alpha_c/
-│   ├── generar_c_critico_mnist.py              # Calcula c_crítico por imagen
-│   ├── generar_R_critico_mnist.py              # Calcula R_crítico por imagen  
+│   ├── calcular_c_critico_local.py             # Calcula c_crítico por imagen
+│   ├── calcular_R_critico_local.py             # Calcula R_crítico por imagen
 │   ├── plot_distribuciones_c_y_R_critico.py    # Distribuciones por clase
 │   └── resultados_c_critical/                   # Datos: bases SQLite de criticalidad
 │
 └── analisis_RvsC/
-    ├── generar_curvas_R_vs_C.py                # Genera curvas R(C) completas
+    ├── calcular_r_vs_c.py                       # Genera curvas R(C) por clase/imagen
     ├── plot_curvas_R_vs_C_todas_clases.py      # Visualiza R(C) por clase
     ├── plot_transicion_fase_promedio.py        # Transición de fase promedio
+    ├── checkpoints/                             # Progreso intermedio de cálculos largos
     └── R_vs_C/                                  # Datos: curvas por imagen/clase
 ```
 
@@ -84,6 +87,19 @@ Opcionalmente puedes desactivar sincronización de rutas de compatibilidad:
 python setup_mnist.py --no-sync-compat
 ```
 
+También puedes personalizar rutas de entrada/salida:
+
+```bash
+# Usar un root de datos distinto
+python setup_mnist.py --data-root ./data
+
+# Forzar fallback local de archivos raw
+python setup_mnist.py --local-raw-source ../data/MNIST/raw
+
+# Sincronizar a rutas adicionales de compatibilidad
+python setup_mnist.py --compat-roots ../codigo/data ../otra_ruta/data
+```
+
 ### Dependencias principales
 
 ```
@@ -102,7 +118,17 @@ tqdm>=4.65.0
 
 ```bash
 cd analisis_distribuciones
-python generar_metricas_kuramoto_train.py
+python run_kuramoto_TRAIN_MAC.py
+
+# Guardar checkpoints cada 500 imágenes
+python run_kuramoto_TRAIN_MAC.py --checkpoint-interval 500
+
+# Configurar rutas personalizadas
+python run_kuramoto_TRAIN_MAC.py \
+    --data-root ../data \
+    --results-dir ./resultados_kuramoto_TRAIN_MAC_60k \
+    --checkpoint-dir ./resultados_kuramoto_TRAIN_MAC_60k/checkpoints \
+    --output-file ./resultados_kuramoto_TRAIN_MAC_60k/metricas_completas_custom.pt
 ```
 
 Este script:
@@ -110,6 +136,8 @@ Este script:
 - Integra la dinámica de Kuramoto por T=100 pasos temporales
 - Calcula series temporales del parámetro de orden r(t)
 - Genera métricas de criticalidad (DFA, PSD, entropía espectral)
+- Permite configurar `--data-root`, `--results-dir`, `--checkpoint-dir`, `--output-file`
+- Permite ajustar frecuencia de guardado con `--checkpoint-interval N` (default: 100)
 - **Salida:** `resultados_kuramoto_TRAIN_MAC_60k/metricas_completas_TRAIN_MAC_60k.pt` (~3 GB)
 
 ### 2. Análisis de valores críticos
@@ -118,10 +146,16 @@ Este script:
 cd analisis_alpha_c
 
 # Calcular c_crítico (acoplamiento crítico)
-python generar_c_critico_mnist.py --all
+python calcular_c_critico_local.py --all
 
 # Calcular R_crítico (parámetro de orden en criticalidad)
-python generar_R_critico_mnist.py --all --use-ch4-n4
+python calcular_R_critico_local.py --all --use-ch4-n4
+
+# Ejemplo con rutas explícitas
+python calcular_c_critico_local.py --clases 0 1 --limite 100 \
+    --db resultados_c_critical/mnist_critical_tot.db \
+    --output resultados_c_critical \
+    --data-root ../data
 ```
 
 Opciones disponibles:
@@ -129,9 +163,14 @@ Opciones disponibles:
 - `--clases 0 1 2`: Procesar clases específicas
 - `--limite 100`: Limitar número de imágenes por clase
 - `--device cuda/mps/cpu`: Seleccionar dispositivo de cómputo
+- `--db`: Ruta del archivo SQLite de salida
+- `--output`: Directorio de salidas (BD/resúmenes/figuras)
+- `--data-root`: Directorio raíz de MNIST
+- `--no-viz`: Omitir visualizaciones en `calcular_c_critico_local.py`
+- `--c-crit`, `--use-ch4-n4`: Opciones específicas de `calcular_R_critico_local.py`
 
 **Salidas:**
-- `resultados_c_critical/mnist_c_critical.db` (SQLite)
+- `resultados_c_critical/mnist_critical_tot.db` (SQLite)
 - `resultados_c_critical/mnist_R_critico.db` (SQLite)
 
 ### 3. Curvas de transición de fase R(C)
@@ -140,13 +179,25 @@ Opciones disponibles:
 cd analisis_RvsC
 
 # Generar curvas R(C) completas
-python generar_curvas_R_vs_C.py --clases 0 1 2 3 4 5 6 7 8 9
+python calcular_r_vs_c.py --clases 0 1 2 3 4 5 6 7 8 9
 
 # O solo para clases específicas
-python generar_curvas_R_vs_C.py --clases 9
+python calcular_r_vs_c.py --clases 9
+
+# Ejemplo con salida personalizada
+python calcular_r_vs_c.py --clases 0 \
+    --db-path R_vs_C/R_vs_C_clase0.db \
+    --data-root ../data \
+    --checkpoint-interval 200
 ```
 
-**Salida:** `R_vs_C/R_vs_C.db` (curvas por imagen en c ∈ [0, 0.4])
+Opciones disponibles:
+- `--clases`: Lista de clases a procesar (si se omite, procesa 0-9)
+- `--db-path`: Ruta del SQLite de salida (ej. `R_vs_C/R_vs_C.db`)
+- `--data-root`: Directorio raíz de MNIST
+- `--checkpoint-interval`: Frecuencia de reporte de progreso
+
+**Salida:** archivo SQLite en `--db-path` (curvas por imagen en c ∈ [0, 0.4]).
 
 ### 4. Generación de visualizaciones
 
@@ -154,15 +205,24 @@ python generar_curvas_R_vs_C.py --clases 9
 # Distribuciones de R estacionario
 cd analisis_distribuciones
 python plot_distribuciones_R_stationary.py
+python plot_distribuciones_R_stationary.py \
+    --ruta-metricas resultados_kuramoto_TRAIN_MAC_60k/metricas_completas_TRAIN_MAC_60k.pt \
+    --ruta-salida resultados_kuramoto_TRAIN_MAC_60k/analisis_distribuciones
 
 # Distribuciones de criticalidad
 cd ../analisis_alpha_c
 python plot_distribuciones_c_y_R_critico.py
+python plot_distribuciones_c_y_R_critico.py \
+    --db-c resultados_c_critical/mnist_critical_tot.db \
+    --db-r resultados_c_critical/mnist_R_critico.db \
+    --output-dir resultados_c_critical
 
 # Curvas de transición de fase
 cd ../analisis_RvsC
 python plot_curvas_R_vs_C_todas_clases.py
 python plot_transicion_fase_promedio.py
+python plot_curvas_R_vs_C_todas_clases.py --db-path R_vs_C/R_vs_C.db --output curvas_todas_clases_excepto_0-0.4.png
+python plot_transicion_fase_promedio.py --db-path R_vs_C/R_vs_C.db --output transicion_fase_sincronizacion_0-0.4.png
 ```
 
 ## 🔬 Fundamentos Teóricos
