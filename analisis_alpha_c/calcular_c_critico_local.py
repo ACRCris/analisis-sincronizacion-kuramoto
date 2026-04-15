@@ -522,11 +522,14 @@ Ejemplos de uso:
     parser.add_argument('--limite', type=int, default=None,
                        help='Límite de imágenes por clase (None = todas)')
     parser.add_argument('--db', type=str, 
-                       default='resultados_c_critical/mnist_critical_tot.db',
-                       help='Ruta de la base de datos SQLite')
+                       default='mnist_critical_tot.db',
+                       help='Archivo SQLite de salida (ruta absoluta o relativa)')
     parser.add_argument('--output', type=str, 
                        default='resultados_c_critical',
                        help='Directorio de salida para resultados')
+    parser.add_argument('--data-root', type=str,
+                       default=str(ANALISIS_ROOT / 'data'),
+                       help='Directorio raíz de MNIST (train/test se descargan o leen aquí)')
     parser.add_argument('--device', type=str, default='auto',
                        choices=['auto', 'cuda', 'mps', 'cpu'],
                        help='Dispositivo a usar')
@@ -595,7 +598,15 @@ Ejemplos de uso:
     # Crear directorio de salida
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    db_path = output_dir / Path(args.db).name
+
+    db_arg = Path(args.db)
+    if db_arg.is_absolute():
+        db_path = db_arg
+    elif db_arg.parent == Path('.'):
+        db_path = output_dir / db_arg
+    else:
+        db_path = db_arg
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Crear base de datos
     create_database(db_path)
@@ -604,9 +615,11 @@ Ejemplos de uso:
     print("\n📥 Cargando dataset MNIST...")
     transform = transforms.Compose([transforms.ToTensor()])
     
-    # Directorio de datos (en el nivel del proyecto)
-    data_dir = ANALISIS_ROOT.parent.parent / 'data'
+    # Directorio de datos configurable por CLI
+    data_dir = Path(args.data_root)
     data_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"📂 Data root: {data_dir}")
     
     train_dataset = torchvision.datasets.MNIST(
         root=str(data_dir), 

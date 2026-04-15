@@ -321,8 +321,20 @@ def main():
     parser.add_argument(
         '--db',
         type=str,
-        default='resultados_c_critical/mnist_R_critico.db',
-        help='Ruta de la base de datos SQLite para R_critico',
+        default='mnist_R_critico.db',
+        help='Archivo SQLite de salida para R_critico (ruta absoluta o relativa)',
+    )
+    parser.add_argument(
+        '--output',
+        type=str,
+        default='resultados_c_critical',
+        help='Directorio de salida para BD/resumen',
+    )
+    parser.add_argument(
+        '--data-root',
+        type=str,
+        default=str(ANALISIS_ROOT / 'data'),
+        help='Directorio raíz de MNIST',
     )
     parser.add_argument(
         '--device',
@@ -384,17 +396,27 @@ def main():
     print(f"📦 PyTorch version: {torch.__version__}")
 
     # Directorio de salida y BD
-    output_dir = SCRIPT_DIR / 'resultados_c_critical'
+    output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
-    db_path = output_dir / Path(args.db).name
+
+    db_arg = Path(args.db)
+    if db_arg.is_absolute():
+        db_path = db_arg
+    elif db_arg.parent == Path('.'):
+        db_path = output_dir / db_arg
+    else:
+        db_path = db_arg
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
     create_database(db_path)
 
     # Dataset MNIST - siempre desde torchvision
     print("\n📥 Cargando dataset MNIST desde torchvision...")
     transform = transforms.Compose([transforms.ToTensor()])
-    data_dir = ANALISIS_ROOT.parent.parent / 'data'
+    data_dir = Path(args.data_root)
     data_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"📂 Data root: {data_dir}")
 
     train_dataset = torchvision.datasets.MNIST(
         root=str(data_dir), train=True, download=True, transform=transform

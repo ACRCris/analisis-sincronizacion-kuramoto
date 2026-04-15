@@ -61,13 +61,19 @@ def verify_batch(trainset) -> None:
     print(f"      - Rango valores: [{float(x.min()):.3f}, {float(x.max()):.3f}]")
 
 
-def find_local_source(base_dir: Path, primary_raw: Path):
-    candidates = [
-        base_dir / "data" / "MNIST" / "raw",
-        base_dir.parent / "data" / "MNIST" / "raw",
-        base_dir.parent / "codigo" / "data" / "MNIST" / "raw",
-        base_dir.parent.parent / "data" / "MNIST" / "raw",
-    ]
+def find_local_source(base_dir: Path, primary_raw: Path, local_raw_source: Path | None = None):
+    candidates = []
+    if local_raw_source is not None:
+        candidates.append(local_raw_source)
+
+    candidates.extend(
+        [
+            base_dir / "data" / "MNIST" / "raw",
+            base_dir.parent / "data" / "MNIST" / "raw",
+            base_dir.parent / "codigo" / "data" / "MNIST" / "raw",
+            base_dir.parent.parent / "data" / "MNIST" / "raw",
+        ]
+    )
 
     seen = set()
     for c in candidates:
@@ -85,12 +91,13 @@ def find_local_source(base_dir: Path, primary_raw: Path):
     return None
 
 
-def sync_compat_roots(primary_root: Path, base_dir: Path) -> None:
+def sync_compat_roots(primary_root: Path, base_dir: Path, compat_roots: list[Path] | None = None) -> None:
     primary_raw = primary_root / "MNIST" / "raw"
-    compat_roots = [
-        base_dir.parent / "data",
-        base_dir.parent.parent / "data",
-    ]
+    if compat_roots is None:
+        compat_roots = [
+            base_dir.parent / "data",
+            base_dir.parent.parent / "data",
+        ]
 
     print("\nSincronizando rutas de compatibilidad...")
     for root in compat_roots:
@@ -113,6 +120,25 @@ def sync_compat_roots(primary_root: Path, base_dir: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Configura MNIST para Analisis_Sincronizacion")
     parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help="Directorio raíz donde se preparará MNIST (default: Analisis_Sincronizacion/data).",
+    )
+    parser.add_argument(
+        "--local-raw-source",
+        type=Path,
+        default=None,
+        help="Ruta opcional a un directorio MNIST/raw local para fallback.",
+    )
+    parser.add_argument(
+        "--compat-roots",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="Rutas opcionales de sincronización de compatibilidad.",
+    )
+    parser.add_argument(
         "--no-sync-compat",
         action="store_true",
         help="No sincronizar rutas de compatibilidad fuera de Analisis_Sincronizacion/data",
@@ -120,7 +146,7 @@ def main() -> int:
     args = parser.parse_args()
 
     base_dir = Path(__file__).resolve().parent
-    primary_root = base_dir / "data"
+    primary_root = args.data_root if args.data_root is not None else base_dir / "data"
     primary_raw = primary_root / "MNIST" / "raw"
 
     print("=" * 80)
@@ -142,7 +168,7 @@ def main() -> int:
         except Exception as e:
             print(f"      ⚠ Descarga remota fallo: {e}")
             print("      → Intentando origen local de respaldo...")
-            src_raw = find_local_source(base_dir, primary_raw)
+            src_raw = find_local_source(base_dir, primary_raw, args.local_raw_source)
             if src_raw is None:
                 print("      ✗ No se encontro origen local completo de MNIST/raw")
                 return 1
@@ -157,7 +183,7 @@ def main() -> int:
     verify_batch(trainset)
 
     if not args.no_sync_compat:
-        sync_compat_roots(primary_root, base_dir)
+        sync_compat_roots(primary_root, base_dir, args.compat_roots)
 
     print("\n" + "=" * 80)
     print("MNIST CONFIGURADO EXITOSAMENTE")

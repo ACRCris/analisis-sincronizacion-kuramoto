@@ -11,6 +11,7 @@ A partir de la base SQLite en
   codigo/analisis_criticalidad_minimalista/analisis_alpha_c/resultados_c_critical/mnist_R_critico.db
 """
 
+import argparse
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -24,8 +25,8 @@ DB_C = BASE_DIR / "mnist_c_critical.db"
 DB_R = BASE_DIR / "mnist_R_critico.db"
 
 
-def cargar_c_critico_por_clase():
-    conn = sqlite3.connect(str(DB_C))
+def cargar_c_critico_por_clase(db_c: Path):
+    conn = sqlite3.connect(str(db_c))
     cursor = conn.cursor()
     c_por_clase = {}
     for clase in range(10):
@@ -36,8 +37,8 @@ def cargar_c_critico_por_clase():
     return c_por_clase
 
 
-def cargar_R_critico():
-    conn = sqlite3.connect(str(DB_R))
+def cargar_R_critico(db_r: Path):
+    conn = sqlite3.connect(str(db_r))
     cursor = conn.cursor()
     R_global = []
     for clase in range(10):
@@ -47,7 +48,7 @@ def cargar_R_critico():
     return np.array(R_global, dtype=float)
 
 
-def plot_c_critico_por_clase(c_por_clase):
+def plot_c_critico_por_clase(c_por_clase, output_dir: Path):
     sns.set(style="whitegrid")
     fig, axes = plt.subplots(2, 5, figsize=(18, 7), sharex=True, sharey=True)
     axes = axes.flatten()
@@ -64,13 +65,14 @@ def plot_c_critico_por_clase(c_por_clase):
 
     fig.suptitle("Distribución de c_critico por clase", fontsize=16, fontweight="bold")
     plt.tight_layout(rect=[0, 0, 1, 0.96])
-    out = BASE_DIR / "distribucion_c_critico_por_clase.png"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    out = output_dir / "distribucion_c_critico_por_clase.png"
     plt.savefig(out, dpi=300)
     plt.close()
     print(f"✅ Guardado {out}")
 
 
-def plot_c_critico_resumen(c_por_clase):
+def plot_c_critico_resumen(c_por_clase, output_dir: Path):
     sns.set(style="whitegrid")
     plt.figure(figsize=(8, 6))
     medios = [np.mean(c_por_clase[k]) for k in range(10)]
@@ -82,14 +84,15 @@ def plot_c_critico_resumen(c_por_clase):
     plt.ylabel("c_critico", fontsize=12)
     plt.title("Resumen de c_critico por clase", fontsize=14, fontweight="bold")
     plt.grid(True, alpha=0.3, linestyle=":")
-    out = BASE_DIR / "distribucion_c_critico_resumen copia 2.png"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    out = output_dir / "distribucion_c_critico_resumen copia 2.png"
     plt.tight_layout()
     plt.savefig(out, dpi=300)
     plt.close()
     print(f"✅ Guardado {out}")
 
 
-def plot_R_critico_total(R_total):
+def plot_R_critico_total(R_total, output_dir: Path):
     from matplotlib.ticker import FuncFormatter
 
     sns.set(style="whitegrid")
@@ -103,7 +106,8 @@ def plot_R_critico_total(R_total):
         return f"{x:.2f}"
 
     plt.gca().xaxis.set_major_formatter(FuncFormatter(fmt))
-    out = BASE_DIR / "distribucion_R_critico_total.png"
+    output_dir.mkdir(exist_ok=True, parents=True)
+    out = output_dir / "distribucion_R_critico_total.png"
     plt.tight_layout()
     plt.savefig(out, dpi=300)
     plt.close()
@@ -111,14 +115,44 @@ def plot_R_critico_total(R_total):
 
 
 def main():
-    print(f"📂 Usando DB c_critico: {DB_C}")
-    print(f"📂 Usando DB R_critico: {DB_R}")
-    c_por_clase = cargar_c_critico_por_clase()
-    R_total = cargar_R_critico()
+    parser = argparse.ArgumentParser(
+        description="Genera distribuciones de c_critico y R_critico desde bases SQLite."
+    )
+    parser.add_argument(
+        "--db-c",
+        type=Path,
+        default=DB_C,
+        help="Ruta al archivo SQLite de c_critico.",
+    )
+    parser.add_argument(
+        "--db-r",
+        type=Path,
+        default=DB_R,
+        help="Ruta al archivo SQLite de R_critico.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=BASE_DIR,
+        help="Directorio donde se guardan las figuras.",
+    )
+    args = parser.parse_args()
+
+    if not args.db_c.exists():
+        parser.error(f"No existe la base de datos de c_critico: {args.db_c}")
+    if not args.db_r.exists():
+        parser.error(f"No existe la base de datos de R_critico: {args.db_r}")
+
+    print(f"📂 Usando DB c_critico: {args.db_c}")
+    print(f"📂 Usando DB R_critico: {args.db_r}")
+    print(f"📁 Directorio de salida: {args.output_dir}")
+
+    c_por_clase = cargar_c_critico_por_clase(args.db_c)
+    R_total = cargar_R_critico(args.db_r)
     print(f"  Total de muestras R_critico: {len(R_total)}")
-    plot_c_critico_por_clase(c_por_clase)
-    plot_c_critico_resumen(c_por_clase)
-    plot_R_critico_total(R_total)
+    plot_c_critico_por_clase(c_por_clase, args.output_dir)
+    plot_c_critico_resumen(c_por_clase, args.output_dir)
+    plot_R_critico_total(R_total, args.output_dir)
 
 
 if __name__ == "__main__":

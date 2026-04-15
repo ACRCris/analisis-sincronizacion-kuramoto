@@ -8,6 +8,7 @@ Usa la base:
 """
 
 from pathlib import Path
+import argparse
 import sqlite3
 import pickle
 
@@ -20,7 +21,27 @@ OUTPUT = Path("curvas_todas_clases_excepto_0-0.4.png")
 
 
 def main():
-    conn = sqlite3.connect(DB_PATH)
+    parser = argparse.ArgumentParser(
+        description="Grafica todas las curvas R vs C a partir de una base SQLite."
+    )
+    parser.add_argument(
+        "--db-path",
+        type=Path,
+        default=DB_PATH,
+        help="Ruta al archivo SQLite con tablas clase_0..clase_9.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=OUTPUT,
+        help="Ruta del PNG de salida.",
+    )
+    args = parser.parse_args()
+
+    if not args.db_path.exists():
+        parser.error(f"No existe la base de datos: {args.db_path}")
+
+    conn = sqlite3.connect(str(args.db_path))
     cursor = conn.cursor()
 
     plt.figure(figsize=(12, 8))
@@ -51,10 +72,10 @@ def main():
     plt.xlim(0.0, 0.4)
     plt.ylim(0.0, 1.0)
     plt.tight_layout()
-    OUTPUT.parent.mkdir(exist_ok=True, parents=True)
-    plt.savefig(OUTPUT, dpi=300)
+    args.output.parent.mkdir(exist_ok=True, parents=True)
+    plt.savefig(args.output, dpi=300)
     plt.close()
-    print(f"✅ Guardado {OUTPUT} (total_curvas={total_curvas})")
+    print(f"✅ Guardado {args.output} (total_curvas={total_curvas})")
 
 
 if __name__ == "__main__":

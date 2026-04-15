@@ -22,7 +22,14 @@ from pathlib import Path
 import time
 
 # Agregar path del módulo padre
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCRIPT_DIR = Path(__file__).resolve().parent
+ANALISIS_SINCRONIZACION_ROOT = SCRIPT_DIR.parent
+DATA_ROOT = ANALISIS_SINCRONIZACION_ROOT / "data"
+sys.path.insert(0, str(ANALISIS_SINCRONIZACION_ROOT))
+
+EXTERNAL_MODULE_ROOT = ANALISIS_SINCRONIZACION_ROOT.parent / "codigo" / "analisis_criticalidad_minimalista"
+if (EXTERNAL_MODULE_ROOT / "datasets").exists():
+    sys.path.insert(0, str(EXTERNAL_MODULE_ROOT))
 
 from kuramoto.modelo import KBlock
 from datasets.loader import MNISTLoader
@@ -54,11 +61,8 @@ CHECKPOINT_INTERVAL = 50  # Guardar cada 50 imágenes
 BATCH_SIZE = 1
 
 # Directorios
-RESULTS_DIR = Path(".")  # Usar directorio actual (analisis_RvsC)
-CHECKPOINT_DIR = RESULTS_DIR / "checkpoints"
-CHECKPOINT_DIR.mkdir(exist_ok=True)
-
-DB_PATH = RESULTS_DIR / "mnist_R_vs_C.db"  # ← Usar nueva DB combinada
+DEFAULT_RESULTS_DIR = SCRIPT_DIR
+DEFAULT_DB_PATH = DEFAULT_RESULTS_DIR / "mnist_R_vs_C.db"
 
 # =============================================================================
 # DETECCIÓN DE DISPOSITIVO
@@ -302,7 +306,36 @@ def main():
     
     parser = argparse.ArgumentParser(description='Calcular R vs C para MNIST')
     parser.add_argument('--clases', type=int, nargs='+', default=None, help='Clases a procesar (ej: --clases 9)')
+    parser.add_argument(
+        '--data-root',
+        type=Path,
+        default=DATA_ROOT,
+        help='Directorio raíz de MNIST',
+    )
+    parser.add_argument(
+        '--db-path',
+        type=Path,
+        default=DEFAULT_DB_PATH,
+        help='Ruta del archivo SQLite de salida',
+    )
+    parser.add_argument(
+        '--checkpoint-interval',
+        type=int,
+        default=CHECKPOINT_INTERVAL,
+        help='Intervalo de reporte de progreso en imágenes',
+    )
     args = parser.parse_args()
+
+    if args.checkpoint_interval < 1:
+        parser.error('--checkpoint-interval debe ser un entero mayor o igual a 1')
+
+    data_root = args.data_root
+    db_path = args.db_path
+    checkpoint_interval = args.checkpoint_interval
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir = db_path.parent / 'checkpoints'
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     
     # Seleccionar clases a procesar
     if args.clases:
@@ -326,28 +359,30 @@ def main():
     print(f"   - Semilla: {SEED}")
     print(f"   - Rango C: [{C_MIN}, {C_MAX}]")
     print(f"   - Puntos C: {len(c_range)}")
-    print(f"   - Espaciado C: 0.02")
-    print(f"   - Base de datos: {DB_PATH}")
-    print(f"   - Checkpoints cada: {CHECKPOINT_INTERVAL} imágenes")
+    print(f"   - Espaciado C: 0.01")
+    print(f"   - Base de datos: {db_path}")
+    print(f"   - Checkpoints cada: {checkpoint_interval} imágenes")
+    print(f"   - Directorio checkpoints: {checkpoint_dir}")
+    print(f"   - Data root: {data_root}")
     print(f"   - Clases a procesar: {list(clases_a_procesar)}")
     print()
     
     # Inicializar DB
     print("📂 Inicializando base de datos...")
-    inicializar_db(DB_PATH)
-    print(f"✅ Base de datos lista: {DB_PATH}")
+    inicializar_db(db_path)
+    print(f"✅ Base de datos lista: {db_path}")
     print()
     
     # Cargar dataset
     print("📂 Cargando MNIST Training Set...")
-    mnist_loader = MNISTLoader(root='../data', batch_size=1, img_size=IMG_SIZE)
+    mnist_loader = MNISTLoader(root=str(data_root), batch_size=1, img_size=IMG_SIZE)
     train_loader, _ = mnist_loader.get_mnist(batch_size=1, train_split=True)
     total_images = len(train_loader.dataset)
     print(f"✅ Dataset cargado: {total_images:,} imágenes")
     print()
     
     # Verificar progreso actual
-    conteo_actual = contar_procesadas(DB_PATH)
+    conteo_actual = contar_procesadas(db_path)
     total_procesadas = sum(conteo_actual.values())
     
     print(f"📊 Progreso actual:")
@@ -411,7 +446,7 @@ def main():
     procesadas_por_clase = {c: 0 for c in range(10)}
     
     # Obtener conteo actual de la DB
-    conteo = contar_procesadas(DB_PATH)
+    conteo = contar_procesadas(db_path)
     
     # Contar imágenes totales por clase en el dataset
     imagenes_por_clase = {c: 0 for c in range(10)}
@@ -432,7 +467,7 @@ def main():
             continue
         
         # Verificar si ya fue procesada
-        if verificar_imagen_procesada(DB_PATH, clase, idx):
+        if verificar_imagen_procesada(db_path, clase, idx):
             saltadas += 1
             pbar.update(1)  # Actualizar barra aunque sea saltada
             # Actualizar info en barra de progreso
@@ -445,7 +480,7 @@ def main():
         r_values = calcular_R_vs_C(imagen, kblock, x_init, c_range, DEVICE)
         
         # Guardar en DB
-        guardar_resultado_db(DB_PATH, clase, idx, c_range, r_values)
+        guardar_resultado_db(db_path, clase, idx, c_range, r_values)
         
         procesadas_sesion += 1
         procesadas_por_clase[clase] += 1
@@ -461,8 +496,8 @@ def main():
                                   for c in clases_a_procesar])
         pbar.set_postfix_str(f"{info_clases} | R:[{r_values.min():.3f},{r_values.max():.3f}]")
         
-        # Checkpoint cada CHECKPOINT_INTERVAL imágenes
-        if procesadas_sesion % CHECKPOINT_INTERVAL == 0:
+        # Checkpoint cada N imágenes
+        if procesadas_sesion % checkpoint_interval == 0:
             elapsed = time.time() - start_time
             velocidad = procesadas_sesion / elapsed if elapsed > 0 else 0
             
@@ -483,7 +518,7 @@ def main():
     
     # Resumen final
     elapsed_total = time.time() - start_time
-    conteo_final = contar_procesadas(DB_PATH)
+    conteo_final = contar_procesadas(db_path)
     total_final = sum(conteo_final.values())
     
     print("\n" + "="*70)
@@ -496,8 +531,8 @@ def main():
     print(f"   - Tiempo total: {elapsed_total/3600:.2f} horas")
     if procesadas_sesion > 0:
         print(f"   - Velocidad promedio: {procesadas_sesion/elapsed_total:.2f} img/s")
-    print(f"\n📁 Base de datos: {DB_PATH}")
-    print(f"   Tamaño: {DB_PATH.stat().st_size / (1024**2):.1f} MB")
+    print(f"\n📁 Base de datos: {db_path}")
+    print(f"   Tamaño: {db_path.stat().st_size / (1024**2):.1f} MB")
     print(f"\n✅ Distribución por clase:")
     for clase, count in conteo_final.items():
         porcentaje = (count / (total_images//10)) * 100 if total_images > 0 else 0

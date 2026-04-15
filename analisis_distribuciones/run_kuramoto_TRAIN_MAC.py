@@ -37,14 +37,23 @@ CARACTERÍSTICAS:
 
 import os
 import sys
+import argparse
 import torch
 import numpy as np
 from tqdm import tqdm
 import time
 from datetime import datetime
+from pathlib import Path
 
 # Agregar el path del módulo
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+SCRIPT_DIR = Path(__file__).resolve().parent
+ANALISIS_SINCRONIZACION_ROOT = SCRIPT_DIR.parent
+DATA_ROOT = ANALISIS_SINCRONIZACION_ROOT / "data"
+sys.path.insert(0, str(ANALISIS_SINCRONIZACION_ROOT))
+
+EXTERNAL_MODULE_ROOT = ANALISIS_SINCRONIZACION_ROOT.parent / "codigo" / "analisis_criticalidad_minimalista"
+if (EXTERNAL_MODULE_ROOT / "datasets").exists():
+    sys.path.insert(0, str(EXTERNAL_MODULE_ROOT))
 
 from kuramoto.modelo import KBlock
 from datasets.loader import MNISTLoader
@@ -58,11 +67,8 @@ from analisis.criticalidad import (
 )
 
 # Configuración - TRAINING SET MAC
-RESULTS_DIR = "resultados_kuramoto_TRAIN_MAC_60k"
-CHECKPOINT_DIR = os.path.join(RESULTS_DIR, "checkpoints")
-
-os.makedirs(RESULTS_DIR, exist_ok=True)
-os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+DEFAULT_RESULTS_DIR = SCRIPT_DIR / "resultados_kuramoto_TRAIN_MAC_60k"
+DEFAULT_CHECKPOINT_DIR = DEFAULT_RESULTS_DIR / "checkpoints"
 
 # Parámetros del modelo Kuramoto
 CH = 4
@@ -229,9 +235,9 @@ def calcular_metricas_imagen_completas(xs, es, idx, label):
     return metricas
 
 
-def guardar_checkpoint(metricas_acumuladas, checkpoint_idx):
+def guardar_checkpoint(metricas_acumuladas, checkpoint_idx, checkpoint_dir):
     """Guarda checkpoint de métricas"""
-    checkpoint_path = os.path.join(CHECKPOINT_DIR, f"checkpoint_{checkpoint_idx:05d}.pt")
+    checkpoint_path = checkpoint_dir / f"checkpoint_{checkpoint_idx:05d}.pt"
     torch.save({
         'metricas': metricas_acumuladas,
         'checkpoint_idx': checkpoint_idx,
@@ -241,20 +247,69 @@ def guardar_checkpoint(metricas_acumuladas, checkpoint_idx):
     return checkpoint_path
 
 
-def cargar_ultimo_checkpoint():
+def cargar_ultimo_checkpoint(checkpoint_dir):
     """Carga el último checkpoint disponible"""
-    checkpoints = sorted([f for f in os.listdir(CHECKPOINT_DIR) if f.startswith('checkpoint_')])
+    checkpoints = sorted([f for f in os.listdir(checkpoint_dir) if f.startswith('checkpoint_')])
     
     if not checkpoints:
         return None, 0
     
-    ultimo_checkpoint = os.path.join(CHECKPOINT_DIR, checkpoints[-1])
+    ultimo_checkpoint = checkpoint_dir / checkpoints[-1]
     data = torch.load(ultimo_checkpoint, weights_only=False)
     
     return data['metricas'], data['checkpoint_idx']
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Ejecuta el análisis Kuramoto en MNIST train con checkpoints configurables."
+    )
+    parser.add_argument(
+        "--data-root",
+        type=Path,
+        default=DATA_ROOT,
+        help="Directorio raíz de datos MNIST.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        type=Path,
+        default=DEFAULT_RESULTS_DIR,
+        help="Directorio base para salidas.",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=Path,
+        default=None,
+        help="Directorio de checkpoints (default: <results-dir>/checkpoints).",
+    )
+    parser.add_argument(
+        "--output-file",
+        type=Path,
+        default=None,
+        help="Ruta del archivo final .pt (default: <results-dir>/metricas_completas_TRAIN_MAC_60k.pt).",
+    )
+    parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=CHECKPOINT_INTERVAL,
+        help="Guardar checkpoint cada N imágenes (por defecto: 100).",
+    )
+    args = parser.parse_args()
+
+    if args.checkpoint_interval < 1:
+        parser.error("--checkpoint-interval debe ser un entero mayor o igual a 1")
+
+    data_root = args.data_root
+    results_dir = args.results_dir
+    checkpoint_dir = args.checkpoint_dir if args.checkpoint_dir is not None else results_dir / "checkpoints"
+    output_file = args.output_file if args.output_file is not None else results_dir / "metricas_completas_TRAIN_MAC_60k.pt"
+
+    results_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_interval = args.checkpoint_interval
+
     print("="*70)
     print("ANÁLISIS DE CRITICALIDAD - KURAMOTO SOBRE MNIST TRAIN SET")
     print("VERSIÓN APPLE M3 (MPS/Metal)")
@@ -267,14 +322,17 @@ def main():
     print("📌 CONFIGURACIÓN:")
     print(f"   - Dataset: MNIST Training Set (60,000 imágenes)")
     print(f"   - Pasos temporales: {T_STEPS}")
-    print(f"   - Checkpoints cada: {CHECKPOINT_INTERVAL} imágenes")
-    print(f"   - Directorio resultados: {RESULTS_DIR}/")
+    print(f"   - Checkpoints cada: {checkpoint_interval} imágenes")
+    print(f"   - Directorio resultados: {results_dir}")
+    print(f"   - Directorio checkpoints: {checkpoint_dir}")
+    print(f"   - Archivo final: {output_file}")
+    print(f"   - Data root: {data_root}")
     print(f"   - Fecha de inicio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
     
     # Cargar dataset - TRAIN SET
     print("📂 Cargando MNIST Training Set...")
-    mnist_loader = MNISTLoader(root='./data', batch_size=1, img_size=IMG_SIZE)
+    mnist_loader = MNISTLoader(root=str(data_root), batch_size=1, img_size=IMG_SIZE)
     train_loader, _ = mnist_loader.get_mnist(batch_size=1, train_split=True)
     total_images = len(train_loader.dataset)
     print(f"✅ Dataset cargado: {total_images:,} imágenes en training set")
@@ -292,7 +350,7 @@ def main():
     print()
     
     # Intentar cargar checkpoint
-    metricas_acumuladas, start_idx = cargar_ultimo_checkpoint()
+    metricas_acumuladas, start_idx = cargar_ultimo_checkpoint(checkpoint_dir)
     if metricas_acumuladas is None:
         metricas_acumuladas = []
         start_idx = 0
@@ -312,7 +370,7 @@ def main():
     print(f"   - Velocidad estimada: ~{velocidad_estimada} img/s")
     print(f"   - Tiempo estimado: {tiempo_horas:.1f} horas")
     print(f"   - Tamaño final estimado: ~3 GB")
-    print(f"   - Checkpoints totales: {total_images // CHECKPOINT_INTERVAL}")
+    print(f"   - Checkpoints totales: {total_images // checkpoint_interval}")
     print()
     
     print("="*70)
@@ -359,8 +417,8 @@ def main():
             pbar.update(1)
             
             # Guardar checkpoint
-            if (idx + 1) % CHECKPOINT_INTERVAL == 0:
-                checkpoint_path = guardar_checkpoint(metricas_acumuladas, idx)
+            if (idx + 1) % checkpoint_interval == 0:
+                checkpoint_path = guardar_checkpoint(metricas_acumuladas, idx, checkpoint_dir)
                 elapsed = time.time() - start_time
                 imgs_procesadas = idx + 1 - start_idx
                 velocidad = imgs_procesadas / elapsed if elapsed > 0 else 0
@@ -368,7 +426,7 @@ def main():
                 tqdm.write(f"   Velocidad actual: {velocidad:.2f} img/s")
     
     # Guardar resultado final
-    final_path = os.path.join(RESULTS_DIR, "metricas_completas_TRAIN_MAC_60k.pt")
+    final_path = output_file
     torch.save({
         'metricas': metricas_acumuladas,
         'total_images': total_images,
