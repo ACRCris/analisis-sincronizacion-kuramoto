@@ -61,6 +61,29 @@ source venv/bin/activate  # En Windows: venv\Scripts\activate
 pip install torch torchvision numpy scipy matplotlib seaborn tqdm
 ```
 
+### Preparación de MNIST (recomendado antes de ejecutar análisis)
+
+Desde la carpeta `Analisis_Sincronizacion`, ejecutar:
+
+```bash
+python setup_mnist.py
+```
+
+Este script replica el flujo de descarga usado en `codigo`:
+- crea la ruta local de datos,
+- llama `datasets.MNIST(..., download=True)` para train y test,
+- valida el dataset con un batch de prueba.
+
+Además, si la descarga remota falla (por ejemplo, error SSL), usa un origen local de respaldo y deja MNIST listo en:
+
+- `Analisis_Sincronizacion/data/MNIST/raw` (ruta principal)
+
+Opcionalmente puedes desactivar sincronización de rutas de compatibilidad:
+
+```bash
+python setup_mnist.py --no-sync-compat
+```
+
 ### Dependencias principales
 
 ```

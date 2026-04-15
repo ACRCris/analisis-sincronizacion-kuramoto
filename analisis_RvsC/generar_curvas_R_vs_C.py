@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from codigo.analisis_criticalidad_minimalista.analisis_RvsC.calcular_r_vs_c import main as _main
+from calcular_r_vs_c import main as _main
 
 
 if __name__ == "__main__":

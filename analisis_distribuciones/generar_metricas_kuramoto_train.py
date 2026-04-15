@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from codigo.analisis_criticalidad_minimalista.run_kuramoto_TRAIN_MAC import main as _main
+from run_kuramoto_TRAIN_MAC import main as _main
 
 
 if __name__ == "__main__":
